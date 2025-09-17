@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>CHEZ — Fan Photo Drop</title>
+<style>
+:root{--bg:#0b0b0f;--fg:#f5f5f7;--muted:#a8a8b3;--accent:#ff4d8d;--card:#14141a}
+*{box-sizing:border-box}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial;background:radial-gradient(1200px 700px at 80% -10%,#1b1b25 0%,#0b0b0f 60%);color:var(--fg)}
+.wrap{max-width:980px;margin:0 auto;padding:16px 16px 64px}
+header{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
+.brand{font-weight:800;letter-spacing:.5px}
+.badge{font-size:.85rem;background:rgba(255,77,141,.08);border:1px solid rgba(255,77,141,.35);padding:6px 10px;border-radius:999px;color:#fff}
+.card{background:var(--card);border:1px solid #2a2a35;border-radius:20px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+h1{font-size:1.4rem;margin:0 0 6px}p{margin:.2rem 0;color:var(--muted)}
+button{appearance:none;border:0;border-radius:14px;padding:14px 18px;font-size:1rem;font-weight:700;cursor:pointer}
+.primary{background:linear-gradient(135deg,#ff4d8d,#ff7a59);color:white}.ghost{background:transparent;border:1px solid #3a3a45;color:var(--fg)}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}@media(max-width:860px){.hero{grid-template-columns:1fr}}
+.preview{position:relative;background:#000;border-radius:16px;overflow:hidden}
+video,canvas{width:100%;height:auto;display:block}
+.overlayBadge{position:absolute;top:12px;left:12px;font-size:.8rem;background:rgba(0,0,0,.5);padding:6px 10px;border-radius:999px;color:#fff;backdrop-filter:blur(6px)}
+.counterBadge{position:absolute;top:12px;right:12px;font-size:.8rem;background:rgba(255,77,141,.85);padding:6px 10px;border-radius:999px;color:#fff;display:none}
+.controls{display:flex;gap:12px;align-items:center;justify-content:center;padding:12px}
+.hint{font-size:.85rem;color:var(--muted)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#101012;color:#fff;border:1px solid #2a2a35;padding:10px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .25s ease}
+.toast.show{opacity:1}.small{font-size:.8rem;color:#9aa}
+.thank{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:50}
+.thank .panel{background:var(--card);border:1px solid #333;border-radius:18px;padding:20px 22px;max-width:420px;text-align:center}
+.unlock{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:60}
+.unlock .panel{background:#16161e;border:1px solid #444;border-radius:18px;padding:22px 24px;max-width:480px;text-align:center}
+.form{display:grid;gap:10px;margin-top:8px}.field{display:grid;gap:6px}
+input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;color:#fff;border-radius:12px;padding:12px}
+.subtle{font-size:.75rem;color:#8b8ba3}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">CHEZ • Fan Photo Drop</div>
+    <div class="badge" id="eventBadge">Perth • 22 Oct 2025</div>
+  </header>
+
+  <div class="card" id="landing">
+    <h1>Take photos from the show ✨</h1>
+    <p>Tap below to open the camera. Snap a photo, confirm it, and it uploads privately to CHEZ’s Dropbox.</p>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="startBtn">Take photos</button>
+      <button class="ghost" id="libraryBtn">Choose from library</button>
+    </div>
+    <p class="hint">By uploading, you confirm you own the photo and allow CHEZ to repost with credit. No faces without consent.</p>
+  </div>
+
+  <div class="hero" style="margin-top:18px">
+    <div class="preview card">
+      <div class="overlayBadge" id="badge">Live camera</div>
+      <div class="counterBadge" id="counter">#1</div>
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="canvas" style="display:none"></canvas>
+    </div>
+    <div class="card">
+      <h1>Controls</h1>
+      <div class="controls">
+        <button class="primary" id="shutterBtn">● Shutter</button>
+        <button class="ghost" id="retakeBtn" disabled>Retake</button>
+        <button class="ghost" id="confirmBtn" disabled>Confirm & Upload</button>
+      </div>
+      <div style="margin-top:10px">
+        <label class="small">Effect:</label>
+        <select id="effectSel">
+          <option value="film">Film (grain + warm + vignette)</option>
+          <option value="bw">B&W (crunchy)</option>
+          <option value="clean">Clean (no effect)</option>
+        </select>
+      </div>
+      <div style="margin-top:10px">
+        <label class="small">Quality:</label>
+        <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.85"/>
+      </div>
+      <div class="form">
+        <div class="field">
+          <label class="small">Instagram handle (optional)</label>
+          <input id="ig" type="text" inputmode="text" placeholder="@yourhandle" autocomplete="off"/>
+        </div>
+        <div class="field">
+          <label class="small">Email (optional)</label>
+          <input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="off"/>
+          <div class="subtle">If you add email, we may send a quick thank-you with community links.</div>
+        </div>
+      </div>
+      <p class="hint">After upload: thank-you screen → camera resets. Unlock a secret link after 5 uploads.</p>
+      <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none"/>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Thank-you overlay -->
+<div class="thank" id="thank">
+  <div class="panel">
+    <div id="thankMsg" style="font-size:1.1rem;margin-bottom:8px">Thanks, baddie ✨</div>
+    <div id="thankSub" class="small">Uploading…</div>
+  </div>
+</div>
+
+<!-- Unlockable modal -->
+<div class="unlock" id="unlock">
+  <div class="panel">
+    <h2 style="margin-top:0">🎁 You unlocked a secret CHEZ demo</h2>
+    <p class="hint" id="unlockCity">Thanks for capturing tonight.</p>
+    <p><a id="unlockLink" class="badge" href="#" target="_blank" rel="noopener">Listen on SoundCloud</a></p>
+    <div style="margin-top:10px"><button class="primary" id="closeUnlock">Back to camera</button></div>
+  </div>
+</div>
+
+<script>
+/* ===== FRONTEND CONFIG — set per show ===== */
+const UPLOAD_ENDPOINT = 'https://chez-uploader.reece-lenzo.workers.dev/upload';
+const EVENT_CODE = 'chez_2025_10_22_perth';
+const EVENT_CITY = 'Perth';
+const EVENT_DATE = '22 Oct 2025';
+const UNLOCK_MIN_UPLOADS = 5; // per-fan threshold
+
+/* ===== Elements ===== */
+const landing = document.getElementById('landing');
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const badge = document.getElementById('badge');
+const counterBadge = document.getElementById('counter');
+const startBtn = document.getElementById('startBtn');
+const libraryBtn = document.getElementById('libraryBtn');
+const fileInput = document.getElementById('fileInput');
+const shutterBtn = document.getElementById('shutterBtn');
+const retakeBtn = document.getElementById('retakeBtn');
+const confirmBtn = document.getElementById('confirmBtn');
+const effectSel = document.getElementById('effectSel');
+const qualitySlider = document.getElementById('quality');
+const toast = document.getElementById('toast');
+const thank = document.getElementById('thank');
+const thankMsg = document.getElementById('thankMsg');
+const thankSub = document.getElementById('thankSub');
+const unlock = document.getElementById('unlock');
+const unlockLink = document.getElementById('unlockLink');
+const unlockCity = document.getElementById('unlockCity');
+const closeUnlock = document.getElementById('closeUnlock');
+const eventBadge = document.getElementById('eventBadge');
+const igInput = document.getElementById('ig');
+const emailInput = document.getElementById('email');
+
+let stream = null;
+let capturedBlob = null;
+
+/* ===== UI helpers ===== */
+function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 2200); }
+function showThank(msg, sub){ thankMsg.textContent = msg; thankSub.textContent = sub || ''; thank.style.display = 'flex'; }
+function hideThank(){ thank.style.display = 'none'; }
+function togglePreviewState(isPreview){ retakeBtn.disabled = !isPreview; confirmBtn.disabled = !isPreview; shutterBtn.disabled = isPreview; badge.textContent = isPreview ? 'Preview' : 'Live camera'; }
+
+/* ===== Camera ===== */
+async function initCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode: { ideal: 'environment' } }, audio:false });
+    video.srcObject = stream;
+    badge.textContent = 'Live camera';
+  }catch(err){
+    badge.textContent = 'Camera unavailable — pick from library';
+    console.error(err);
+  }
+  eventBadge.textContent = `${EVENT_CITY} • ${EVENT_DATE}`;
+}
+
+startBtn.addEventListener('click', async ()=>{ await initCamera(); landing.style.display='none'; });
+libraryBtn.addEventListener('click', ()=> fileInput.click());
+
+fileInput.addEventListener('change', async (e)=>{
+  const file = e.target.files?.[0];
+  if(file){ const img = await createImageBitmap(file); drawWithEffect(img); await prepareBlob(); togglePreviewState(true); }
+});
+
+shutterBtn.addEventListener('click', async ()=>{
+  if(!video.videoWidth){ showToast('Camera not ready yet'); return; }
+  drawWithEffect(video); await prepareBlob(); togglePreviewState(true);
+});
+
+retakeBtn.addEventListener('click', ()=>{
+  capturedBlob=null; canvas.style.display='none'; video.style.display='block';
+  togglePreviewState(false); badge.textContent = 'Live camera';
+});
+
+/* ===== Upload ===== */
+confirmBtn.addEventListener('click', async ()=>{
+  if(!capturedBlob){ showToast('Nothing to upload yet'); return; }
+  confirmBtn.disabled = true; showThank('Thanks, baddie ✨', 'Uploading your shot…');
+  try{
+    const form = new FormData();
+    const filename = `chez_${Date.now()}.jpg`;
+    form.append('file', capturedBlob, filename);
+    form.append('event', EVENT_CODE);
+    form.append('effect', effectSel.value);
+    form.append('city', EVENT_CITY);
+    form.append('date', EVENT_DATE);
+    if(igInput.value) form.append('ig', igInput.value.trim());
+    if(emailInput.value) form.append('email', emailInput.value.trim());
+
+    // per-fan counter in localStorage
+    const localCount = incLocalCount();
+    form.append('client_uploads', String(localCount));
+
+    const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body: form });
+    if(!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    const json = await res.json();
+
+    counterBadge.style.display='block';
+    counterBadge.textContent = `#${json.count || '?'}`;
+    thankSub.textContent = `You’re upload #${json.count || '?'} tonight!`;
+
+    setTimeout(()=>{ hideThank(); }, 1400);
+
+    // Unlock logic
+    if(json.unlock_url){
+      unlockLink.href = json.unlock_url;
+      unlockCity.textContent = `Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`;
+      setTimeout(()=> unlock.style.display='flex', 1500);
+    }
+
+    // reset
+    capturedBlob = null; retakeBtn.disabled = true; confirmBtn.disabled = true; shutterBtn.disabled = false;
+    badge.textContent = 'Live camera'; canvas.style.display='none'; video.style.display='block';
+  }catch(e){
+    console.error(e);
+    thankMsg.textContent='Upload error'; thankSub.textContent='Please try again';
+    setTimeout(()=> hideThank(), 1600); confirmBtn.disabled=false;
+  }
+});
+
+closeUnlock.addEventListener('click', ()=>{ unlock.style.display='none'; });
+
+/* ===== Effects + watermark ===== */
+function drawWithEffect(source){
+  const w = source.videoWidth || source.width || 1080;
+  const h = source.videoHeight || source.height || 1440;
+  const maxW = 1440; const scale = Math.min(1, maxW / w);
+  canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+  const effect = effectSel.value;
+  if(effect === 'film'){ applyFilm(ctx, canvas); }
+  else if(effect === 'bw'){ applyBW(ctx, canvas); }
+  // watermark
+  drawWatermark(ctx, canvas);
+
+  canvas.style.display='block'; video.style.display='none';
+}
+
+function applyFilm(ctx, cvs){
+  const imgData = ctx.getImageData(0,0,cvs.width,cvs.height); const d = imgData.data;
+  for(let i=0;i<d.length;i+=4){
+    let r=d[i], g=d[i+1], b=d[i+2];
+    r = curve(r); g = curve(g); b = curve(b);
+    r=r*1.05; g=g*1.02; b=b*0.98;
+    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+    const roll = (lum>220)? (1 - Math.min(1,(lum-220)/35))*0.15 : 1.0;
+    d[i]=clamp(r*roll); d[i+1]=clamp(g*roll); d[i+2]=clamp(b*roll);
+  }
+  ctx.putImageData(imgData,0,0);
+  addGrain(ctx, cvs, 0.18); addVignette(ctx, cvs, 0.25); halation(ctx, cvs, 0.12);
+}
+function applyBW(ctx, cvs){
+  const imgData = ctx.getImageData(0,0,cvs.width,cvs.height); const d = imgData.data;
+  for(let i=0;i<d.length;i+=4){
+    const y = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    let v = curve(y*1.05); d[i]=d[i+1]=d[i+2]=clamp(v);
+  }
+  ctx.putImageData(imgData,0,0); addGrain(ctx, cvs, 0.22); addVignette(ctx, cvs, 0.3);
+}
+function curve(x){ const t = x/255; const y = t*(1.2-t*0.2); return y*255; }
+function clamp(v){ return Math.max(0, Math.min(255, v)); }
+function addGrain(ctx, cvs, intensity){
+  const {width:w, height:h} = cvs; const g = ctx.createImageData(w,h); const d = g.data;
+  for(let i=0;i<d.length;i+=4){ const n = (Math.random()*2-1) * 255 * intensity; d[i]=d[i+1]=d[i+2]=128 + n; d[i+3]=25; }
+  ctx.globalCompositeOperation='overlay'; ctx.putImageData(g,0,0); ctx.globalCompositeOperation='source-over';
+}
+function addVignette(ctx, cvs, strength){
+  const {width:w,height:h}=cvs; const grd=ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.2, w/2,h/2, Math.max(w,h)*0.7);
+  grd.addColorStop(0,'rgba(0,0,0,0)'); grd.addColorStop(1,`rgba(0,0,0,${strength})`);
+  ctx.fillStyle=grd; ctx.fillRect(0,0,w,h);
+}
+function halation(ctx, cvs, amount){
+  const {width:w,height:h}=cvs; const tmp=document.createElement('canvas'); tmp.width=w; tmp.height=h; const tctx=tmp.getContext('2d');
+  tctx.drawImage(cvs,0,0); tctx.globalCompositeOperation='screen'; tctx.filter='blur(3px)'; tctx.drawImage(cvs,0,0,w,h); tctx.filter='none';
+  ctx.globalAlpha = amount; ctx.drawImage(tmp,0,0); ctx.globalAlpha=1;
+}
+function drawWatermark(ctx, cvs){
+  const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
+  const pad = Math.round(cvs.width * 0.02);
+  ctx.save();
+  const m = measureText(ctx, text, 'bold 18px Inter, sans-serif');
+  const x = cvs.width - m.width - pad*1.5; const y = cvs.height - pad*1.2;
+  const w = m.width + pad; const h = m.actualHeight + pad*0.6;
+  roundRect(ctx, x-pad*0.5, y-h*0.85, w, h, 10, 'rgba(0,0,0,.45)');
+  ctx.font = 'bold 18px Inter, sans-serif'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.92; ctx.fillText(text, x, y);
+  ctx.restore();
+}
+function measureText(ctx, text, font){ ctx.font = font; const met = ctx.measureText(text); const actualHeight = met.actualBoundingBoxAscent + met.actualBoundingBoxDescent || 22; return { width: met.width, actualHeight }; }
+function roundRect(ctx, x, y, w, h, r, fill){ ctx.beginPath(); ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r); ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+
+/* ===== Blob prep ===== */
+async function prepareBlob(){
+  const q = parseFloat(qualitySlider.value || '0.85');
+  return new Promise(res=> canvas.toBlob(b=>{ capturedBlob=b; res(); }, 'image/jpeg', q));
+}
+
+/* ===== Local unlock counter ===== */
+function incLocalCount(){
+  const key = `chez_up_count_${EVENT_CODE}`;
+  const n = parseInt(localStorage.getItem(key)||'0',10)+1;
+  localStorage.setItem(key, String(n));
+  return n;
+}
+
+/* ===== Boot ===== */
+if(navigator.mediaDevices?.getUserMedia){ initCamera().catch(()=>{}); }
+</script>
+</body>
+</html>
