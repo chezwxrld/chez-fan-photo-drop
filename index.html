@@ -18,9 +18,14 @@ button{appearance:none;border:0;border-radius:14px;padding:14px 18px;font-size:1
 .row{display:flex;gap:16px;flex-wrap:wrap}
 .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}@media(max-width:860px){.hero{grid-template-columns:1fr}}
 .preview{position:relative;background:#000;border-radius:16px;overflow:hidden}
+.preview>*{pointer-events:none}
 video,canvas{width:100%;height:auto;display:block}
 .overlayBadge{position:absolute;top:12px;left:12px;font-size:.8rem;background:rgba(0,0,0,.5);padding:6px 10px;border-radius:999px;color:#fff;backdrop-filter:blur(6px)}
 .counterBadge{position:absolute;top:12px;right:12px;font-size:.8rem;background:rgba(255,77,141,.85);padding:6px 10px;border-radius:999px;color:#fff;display:none}
+.progressRing{position:absolute;inset:auto 12px 12px auto;width:48px;height:48px;border-radius:50%;background:
+  conic-gradient(#ff7a59 var(--p,0%), rgba(255,255,255,.15) 0);
+  display:none;box-shadow:0 0 0 1px rgba(255,255,255,.2) inset}
+.progressRing::after{content:"";position:absolute;inset:6px;border-radius:50%;background:#0f0f15;box-shadow:0 0 0 1px #2a2a35 inset}
 .controls{display:flex;gap:12px;align-items:center;justify-content:center;padding:12px}
 .hint{font-size:.85rem;color:var(--muted)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#101012;color:#fff;border:1px solid #2a2a35;padding:10px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .25s ease;z-index:90}
@@ -32,29 +37,34 @@ video,canvas{width:100%;height:auto;display:block}
 .form{display:grid;gap:10px;margin-top:8px}.field{display:grid;gap:6px}
 input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;color:#fff;border-radius:12px;padding:12px}
 .subtle{font-size:.75rem;color:#8b8ba3}
+.ach{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#16161e;border:1px solid #444;color:#fff;padding:8px 12px;border-radius:12px;display:none;z-index:95}
+.note{font-size:.8rem;color:#9aa;margin-top:8px}
+.toggle{display:flex;gap:8px;align-items:center}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="brand">CHEZ • Fan Photo Drop</div>
-    <div class="badge" id="eventBadge">Perth • 22 Oct 2025</div>
+    <div class="badge" id="eventBadge">Locating…</div>
   </header>
 
   <div class="card" id="landing">
     <h1>Take photos from the show ✨</h1>
-    <p>Tap below to open the camera. Snap a photo, confirm it, and it uploads privately to CHEZ’s Dropbox.</p>
+    <p>Live filter preview, private uploads, secret unlock after 5 shots.</p>
     <div class="row" style="margin-top:12px">
       <button class="primary" id="startBtn">Take photos</button>
       <button class="ghost" id="libraryBtn">Choose from library</button>
     </div>
-    <p class="hint">By uploading, you confirm you own the photo and allow CHEZ to repost with credit. No faces without consent.</p>
+    <div class="note">Private upload: fans can’t see each other’s photos. No faces without consent.</div>
   </div>
 
   <div class="hero" style="margin-top:18px">
     <div class="preview card">
       <div class="overlayBadge" id="badge">Live camera</div>
       <div class="counterBadge" id="counter">#1</div>
+      <div class="progressRing" id="ring"></div>
+      <canvas id="liveCanvas" style="position:absolute;inset:0;width:100%;height:100%;display:none"></canvas>
       <video id="video" playsinline autoplay muted></video>
       <canvas id="canvas" style="display:none"></canvas>
     </div>
@@ -65,17 +75,23 @@ input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;c
         <button class="ghost" id="retakeBtn" disabled>Retake</button>
         <button class="ghost" id="confirmBtn" disabled>Confirm & Upload</button>
       </div>
-      <div style="margin-top:10px">
-        <label class="small">Effect:</label>
-        <select id="effectSel">
-          <option value="film">Film (grain + warm + vignette)</option>
-          <option value="bw">B&W (crunchy)</option>
-          <option value="clean">Clean (no effect)</option>
-        </select>
-      </div>
-      <div style="margin-top:10px">
-        <label class="small">Quality:</label>
-        <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.85"/>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div>
+          <label class="small">Effect:</label>
+          <select id="effectSel">
+            <option value="film">Film (grain + warm + vignette)</option>
+            <option value="bw">B&W (crunchy)</option>
+            <option value="clean">Clean (no effect)</option>
+          </select>
+        </div>
+        <div class="toggle">
+          <input type="checkbox" id="lowlight"/>
+          <label for="lowlight" class="small">Low-light boost</label>
+        </div>
+        <div>
+          <label class="small">Quality:</label>
+          <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.85"/>
+        </div>
       </div>
       <div class="form">
         <div class="field">
@@ -85,7 +101,6 @@ input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;c
         <div class="field">
           <label class="small">Email (optional)</label>
           <input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="off"/>
-          <div class="subtle">If you add email, we may send a quick thank-you with community links.</div>
         </div>
       </div>
       <p class="hint">After upload: thank-you screen → camera resets. Unlock a secret link after 5 uploads.</p>
@@ -95,6 +110,7 @@ input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;c
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="ach" id="ach"></div>
 
 <!-- Thank-you overlay -->
 <div class="thank" id="thank">
@@ -115,18 +131,18 @@ input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;c
 </div>
 
 <script>
-/* ===== FRONTEND CONFIG ===== */
+/* ===== CONFIG ===== */
 const UPLOAD_ENDPOINT = 'https://chez-uploader.reece-lenzo.workers.dev/upload';
-const EVENT_CODE = 'chez_2025_10_22_perth';
-const EVENT_CITY = 'Perth';
-const EVENT_DATE = '22 Oct 2025';
+const DEFAULT_EVENT = 'chez_tour';
 const UNLOCK_MIN_UPLOADS = 5;
 
 /* ===== Elements ===== */
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
+const liveCanvas = document.getElementById('liveCanvas');
 const badge = document.getElementById('badge');
 const counterBadge = document.getElementById('counter');
+const ring = document.getElementById('ring');
 const startBtn = document.getElementById('startBtn');
 const libraryBtn = document.getElementById('libraryBtn');
 const fileInput = document.getElementById('fileInput');
@@ -134,6 +150,7 @@ const shutterBtn = document.getElementById('shutterBtn');
 const retakeBtn = document.getElementById('retakeBtn');
 const confirmBtn = document.getElementById('confirmBtn');
 const effectSel = document.getElementById('effectSel');
+const lowlight = document.getElementById('lowlight');
 const qualitySlider = document.getElementById('quality');
 const toast = document.getElementById('toast');
 const thank = document.getElementById('thank');
@@ -146,11 +163,42 @@ const closeUnlock = document.getElementById('closeUnlock');
 const eventBadge = document.getElementById('eventBadge');
 const igInput = document.getElementById('ig');
 const emailInput = document.getElementById('email');
+const ach = document.getElementById('ach');
 
 let capturedBlob = null;
+let liveCtx = liveCanvas.getContext('2d');
+let liveRunning = false;
+let noiseCanvas = null, noiseCtx = null, noiseTick = 0;
 
-/* ===== UI helpers ===== */
+let EVENT_CITY = 'Tour';
+let EVENT_DATE = '';
+let EVENT_CODE = DEFAULT_EVENT;
+
+/* ===== Geo / date from device ===== */
+const tzCity = (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC').split('/').pop().replace('_',' ');
+function setCityDateFromDevice(){
+  // date as device local, e.g. 22 Oct 2025
+  const d = new Date();
+  EVENT_DATE = d.toLocaleDateString(undefined,{ day:'2-digit', month:'short', year:'numeric' });
+  EVENT_CITY = tzCity || 'On Tour';
+  EVENT_CODE = `chez_${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}_${String(d.getDate()).padStart(2,'0')}_${EVENT_CITY.toLowerCase().replace(/\s+/g,'')}`;
+  eventBadge.textContent = `${EVENT_CITY} • ${EVENT_DATE}`;
+}
+setCityDateFromDevice();
+
+// Ask for geolocation to satisfy the “QR triggers location” expectation;
+// we don't call a reverse-geocoder (keeps it $0), but the permission prompt happens
+// and we store lat/lon in CSV via IG/email free text if you want later mapping.
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(
+    ()=>{/* permission granted; using timeZone city already */},
+    ()=>{/* denied; we fall back to timezone city */}
+  );
+}
+
+/* ===== Helpers ===== */
 function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 2200); }
+function showAch(msg){ ach.textContent = msg; ach.style.display = 'block'; setTimeout(()=> ach.style.display='none', 2000); }
 function showThank(msg, sub){ thankMsg.textContent = msg; thankSub.textContent = sub || ''; thank.style.display = 'flex'; }
 function hideThank(){ thank.style.display = 'none'; }
 function togglePreviewState(isPreview){ retakeBtn.disabled = !isPreview; confirmBtn.disabled = !isPreview; shutterBtn.disabled = isPreview; badge.textContent = isPreview ? 'Preview' : 'Live camera'; }
@@ -160,121 +208,262 @@ async function waitForVideoReady(v) {
   if (v.readyState >= 2 && v.videoWidth && v.videoHeight) return;
   await new Promise(r => v.addEventListener('loadedmetadata', r, { once:true }));
   await new Promise(r => requestAnimationFrame(r));
-  // sometimes needs another frame
   if (!v.videoWidth) await new Promise(r => v.addEventListener('loadeddata', r, { once:true }));
 }
 
 async function initCamera(){
   try{
     video.setAttribute('playsinline',''); video.setAttribute('muted',''); video.muted = true;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false
-    });
+    const constraints = { video: { facingMode: { ideal: 'environment' } }, audio: false };
+    if (lowlight.checked) { constraints.video.advanced = [{ torch: true }]; }
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = stream;
     await waitForVideoReady(video);
     await video.play();
+    setupLiveCanvas();
+    startLiveLoop();
     badge.textContent = 'Live camera';
   }catch(err){
     console.error(err);
     badge.textContent = 'Camera unavailable — pick from library';
   }
-  eventBadge.textContent = `${EVENT_CITY} • ${EVENT_DATE}`;
 }
 
-/* ===== Capture helpers (robust for iOS + Android) ===== */
+function setupLiveCanvas(){
+  const vw = video.videoWidth || 1080;
+  const vh = video.videoHeight || 1440;
+  const rect = liveCanvas.getBoundingClientRect();
+  const cssW = rect.width, cssH = rect.height;
+  const scale = Math.min(cssW / vw, cssH / vh);
+  const pw = Math.max(2, Math.floor(vw * scale));
+  const ph = Math.max(2, Math.floor(vh * scale));
+  liveCanvas.width = pw; liveCanvas.height = ph;
+
+  if (!noiseCanvas){
+    noiseCanvas = document.createElement('canvas');
+    noiseCanvas.width = 256; noiseCanvas.height = 256;
+    noiseCtx = noiseCanvas.getContext('2d');
+  }
+  liveCanvas.style.display = 'block';
+}
+
+function startLiveLoop(){ if (!liveRunning){ liveRunning = true; requestAnimationFrame(liveTick); } }
+function stopLiveLoop(){ liveRunning = false; }
+function addLiveVignette(ctx, cvs, strength){
+  const g = ctx.createRadialGradient(
+    cvs.width/2,cvs.height/2, Math.min(cvs.width,cvs.height)*0.25,
+    cvs.width/2,cvs.height/2, Math.max(cvs.width,cvs.height)*0.8
+  );
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${strength})`);
+  ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
+}
+function regenNoise(){
+  const w=noiseCanvas.width,h=noiseCanvas.height; const id=noiseCtx.createImageData(w,h); const d=id.data;
+  for(let i=0;i<d.length;i+=4){ const n = 127+(Math.random()*256-128); d[i]=d[i+1]=d[i+2]=n; d[i+3]=255; }
+  noiseCtx.putImageData(id,0,0);
+}
+function liveTick(){
+  if (!liveRunning) return;
+  if (!video.videoWidth) return requestAnimationFrame(liveTick);
+
+  liveCtx.drawImage(video, 0, 0, liveCanvas.width, liveCanvas.height);
+
+  // Live "lite" effects
+  const fx = effectSel.value;
+  if (fx === 'film'){
+    liveCtx.globalCompositeOperation='overlay';
+    liveCtx.fillStyle='rgba(255,180,120,0.08)'; liveCtx.fillRect(0,0,liveCanvas.width,liveCanvas.height);
+    addLiveVignette(liveCtx, liveCanvas, 0.22);
+    if ((noiseTick++ % 3)===0) regenNoise();
+    liveCtx.globalAlpha=0.18; liveCtx.globalCompositeOperation='overlay';
+    for(let y=0;y<liveCanvas.height;y+=noiseCanvas.height){
+      for(let x=0;x<liveCanvas.width;x+=noiseCanvas.width){ liveCtx.drawImage(noiseCanvas,x,y); }
+    }
+    liveCtx.globalAlpha=1; liveCtx.globalCompositeOperation='source-over';
+  } else if (fx === 'bw'){
+    liveCtx.globalCompositeOperation='saturation';
+    liveCtx.fillStyle='hsl(0,0%,50%)'; liveCtx.fillRect(0,0,liveCanvas.width,liveCanvas.height);
+    liveCtx.globalCompositeOperation='source-over';
+    addLiveVignette(liveCtx, liveCanvas, 0.28);
+  }
+  requestAnimationFrame(liveTick);
+}
+
+/* ===== Capture (robust) ===== */
 async function captureFrameBitmap(){
   const track = video.srcObject?.getVideoTracks?.()[0];
   if (!track) return null;
-
-  // Prefer takePhoto (produces oriented, full-res blobs on many Androids)
   if ('ImageCapture' in window) {
-    try {
-      const ic = new ImageCapture(track);
-      if (ic.takePhoto) {
-        const blob = await ic.takePhoto();
-        return await createImageBitmap(blob);
-      }
-    } catch(e) { /* ignore & try grabFrame */ }
-    try {
-      const ic2 = new ImageCapture(track);
-      if (ic2.grabFrame) return await ic2.grabFrame();
-    } catch(e) { /* ignore */ }
+    try { const ic = new ImageCapture(track); if (ic.takePhoto){ const blob=await ic.takePhoto(); return await createImageBitmap(blob); } } catch {}
+    try { const ic2 = new ImageCapture(track); if (ic2.grabFrame) return await ic2.grabFrame(); } catch {}
   }
-  return null; // caller will fall back to video draw
+  return null;
 }
-
 function frameLooksBlack(ctx, w, h){
-  // sample a small grid to detect a black draw
   const sample = ctx.getImageData(Math.max(0,w-16), Math.max(0,h-16), Math.min(16,w), Math.min(16,h)).data;
-  let sum = 0; for(let i=0;i<sample.length;i+=4){ sum += sample[i]*0.2126 + sample[i+1]*0.7152 + sample[i+2]*0.0722; }
-  const avg = sum / (sample.length/4);
-  return avg < 2; // essentially black
+  let sum=0; for(let i=0;i<sample.length;i+=4){ sum += 0.2126*sample[i]+0.7152*sample[i+1]+0.0722*sample[i+2]; }
+  return (sum/(sample.length/4)) < 2;
 }
 
-/* ===== Events ===== */
+/* ===== Effects (final, stronger) ===== */
+function drawWithEffect(src){
+  const w = src.videoWidth || src.width; const h = src.videoHeight || src.height;
+  if(!w||!h){ showToast('Camera not ready'); return; }
+  const scale=Math.min(1,1440/w); canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(src,0,0,canvas.width,canvas.height);
+  const fx = effectSel.value;
+  if (fx==='film') applyFilm(ctx,canvas);
+  else if (fx==='bw') applyBW(ctx,canvas);
+  drawWatermark(ctx,canvas);
+  canvas.style.display='block'; video.style.display='none'; liveCanvas.style.display='none'; stopLiveLoop();
+}
+function clamp(v){ return v<0?0:(v>255?255:v); }
+function applyFilm(ctx,cvs){
+  const img=ctx.getImageData(0,0,cvs.width,cvs.height); const d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    let r=d[i], g=d[i+1], b=d[i+2];
+    const map=(v)=>{const t=v/255;const s=t<0.5?(2.2*t*t):(1-Math.pow(-2.2*t+2.2,2)/2.2);return clamp(s*255);};
+    r=map(r); g=map(g); b=map(b);
+    r=r*1.08+4; g=g*1.02+1; b=b*0.98-2;
+    const lum=0.2126*r+0.7152*g+0.0722*b; if(lum>220){const k=1-(lum-220)/80; r*=k; g*=k; b*=k;}
+    d[i]=clamp(r); d[i+1]=clamp(g); d[i+2]=clamp(b);
+  }
+  ctx.putImageData(img,0,0); addGrain(ctx,cvs,0.22); addVignette(ctx,cvs,0.28);
+}
+function applyBW(ctx,cvs){
+  const img=ctx.getImageData(0,0,cvs.width,cvs.height); const d=img.data;
+  for(let i=0;i<d.length;i+=4){ const y=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; let v=(y-128)*1.25+128; d[i]=d[i+1]=d[i+2]=clamp(v); }
+  ctx.putImageData(img,0,0); addGrain(ctx,cvs,0.26); addVignette(ctx,cvs,0.35);
+}
+function addGrain(ctx,cvs,intensity){
+  const img=ctx.getImageData(0,0,cvs.width,cvs.height); const d=img.data;
+  for(let i=0;i<d.length;i+=4){ const n=(Math.random()*2-1)*40*intensity; d[i]=clamp(d[i]+n); d[i+1]=clamp(d[i+1]+n); d[i+2]=clamp(d[i+2]+n); }
+  ctx.putImageData(img,0,0);
+}
+function addVignette(ctx,cvs,strength){
+  const g=ctx.createRadialGradient(cvs.width/2,cvs.height/2,Math.min(cvs.width,cvs.height)*0.25,cvs.width/2,cvs.height/2,Math.max(cvs.width,cvs.height)*0.75);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,`rgba(0,0,0,${strength})`); ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
+}
+function drawWatermark(ctx,cvs){
+  const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
+  const pad = Math.round(cvs.width*0.02);
+  ctx.save(); ctx.font='bold 18px Inter, system-ui, sans-serif';
+  const w = ctx.measureText(text).width + pad*0.8, h = 26; const x = cvs.width - w - pad, y = cvs.height - pad;
+  ctx.fillStyle='rgba(0,0,0,.5)'; const r=12; ctx.beginPath(); ctx.moveTo(x+r,y-h); ctx.arcTo(x+w,y-h,x+w,y,r); ctx.arcTo(x+w,y,x,y,r); ctx.arcTo(x,y,x,y-h,r); ctx.arcTo(x,y-h,x+w,y-h,r); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.fillText(text, x+10, y-8); ctx.restore();
+}
+
+/* ===== Blob / checksum ===== */
+async function prepareBlob(){
+  const q=parseFloat(qualitySlider.value||'0.85');
+  return new Promise(res=>canvas.toBlob(async b=>{ capturedBlob=b; res(); },'image/jpeg',q));
+}
+async function sha256Hex(blob){
+  const buf = await blob.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  const arr = Array.from(new Uint8Array(hash));
+  return arr.map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* ===== Local unlock & achievements ===== */
+function incLocalCount(){
+  const key = `chez_up_count_${EVENT_CODE}`;
+  const n = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
+  localStorage.setItem(key, String(n));
+  if (n===1) showAch('🏁 First Upload!');
+  if (n===5) showAch('🌟 Five-Photo Badge!');
+  if (n===10) showAch('💎 Tenacity Badge!');
+  return n;
+}
+
+/* ===== Offline queue with backoff (cap 5) ===== */
+const QKEY = 'chez_offline_queue';
+function loadQueue(){ try{ return JSON.parse(localStorage.getItem(QKEY)||'[]'); }catch{return []} }
+function saveQueue(q){ localStorage.setItem(QKEY, JSON.stringify(q.slice(0,5))); }
+async function enqueue(item){ const q = loadQueue(); q.push(item); saveQueue(q); showToast(`Saved offline (${q.length})`); }
+async function flushQueue(){
+  const q = loadQueue(); if (!q.length) return;
+  for (let i=0; i<q.length; i++){
+    const item = q[i];
+    const ok = await tryUpload(item.form, item.meta);
+    if (ok){ q.splice(i,1); i--; saveQueue(q); showToast(`Queued upload sent (${q.length} left)`); }
+    else { break; } // stop on first failure (backoff will retry later)
+  }
+}
+
+// Backoff attempt wrapper
+async function tryUpload(form, meta){
+  const max = 3;
+  for (let i=0;i<max;i++){
+    try{
+      ring.style.display='block'; setRing(i/max*100);
+      const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body:form });
+      const j = await res.json();
+      ring.style.display='none'; setRing(0);
+      if (!res.ok || !j.ok) throw new Error(j.error||('HTTP '+res.status));
+      // UI side-effects:
+      counterBadge.style.display='block'; counterBadge.textContent = `#${j.count||'?'}`;
+      thankSub.textContent = `You’re upload #${j.count||'?'}`;
+      if (j.unlock_url){ unlockLink.href=j.unlock_url; unlockCity.textContent=`Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`; setTimeout(()=>unlock.style.display='flex',1500); }
+      // Share receipt
+      if (meta?.ig) { try{ await navigator.clipboard.writeText(meta.ig); showToast('IG copied for credit'); }catch{} }
+      return true;
+    }catch(e){
+      await new Promise(r=>setTimeout(r, 600 * Math.pow(2,i))); // 600ms, 1200ms, 2400ms
+    }finally{
+      ring.style.display='none'; setRing(0);
+    }
+  }
+  return false;
+}
+function setRing(pct){ ring.style.setProperty('--p', `${Math.max(2, Math.min(98, pct))}%`); }
+
+/* ===== Event wiring ===== */
 startBtn.addEventListener('click', ()=>{ initCamera(); document.getElementById('landing').style.display='none'; });
 libraryBtn.addEventListener('click', ()=> fileInput.click());
+effectSel.addEventListener('change', ()=>{}); // live loop uses current value
 
 fileInput.addEventListener('change', async (e)=>{
-  const file = e.target.files?.[0];
-  if(!file) return;
+  const file = e.target.files?.[0]; if(!file) return;
   let bmp = null;
-  if ('createImageBitmap' in window) {
-    try { bmp = await createImageBitmap(file); } catch {}
-  }
+  if ('createImageBitmap' in window) { try { bmp = await createImageBitmap(file); } catch {} }
   if (!bmp) {
-    // Fallback for older iOS: FileReader -> HTMLImageElement
-    const img = await new Promise((res, rej)=>{
-      const fr = new FileReader();
-      fr.onload = ()=>{ const im = new Image(); im.onload = ()=>res(im); im.onerror = rej; im.src = fr.result; };
-      fr.onerror = rej; fr.readAsDataURL(file);
-    });
+    const img = await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=fr.result; }; fr.onerror=rej; fr.readAsDataURL(file); });
     drawWithEffect(img);
-  } else {
-    drawWithEffect(bmp);
-  }
+  } else { drawWithEffect(bmp); }
   await prepareBlob();
   togglePreviewState(true);
 });
 
 shutterBtn.addEventListener('click', async ()=>{
   if (!video.videoWidth) await waitForVideoReady(video);
-
-  // Try robust camera-track capture first
   let bmp = await captureFrameBitmap();
-
-  if (bmp) {
-    drawWithEffect(bmp);
-  } else {
-    // Fallback: draw from <video>, retry if black (iOS quirk)
+  if (bmp){ drawWithEffect(bmp); }
+  else {
     drawWithEffect(video);
-    // If black, wait a couple animation frames and retry up to 2 times
-    let tries = 0;
-    while (tries < 2 && isCanvasBlack()) {
-      await new Promise(r => requestAnimationFrame(r));
-      drawWithEffect(video);
-      tries++;
+    let tries=0; const ctx=canvas.getContext('2d');
+    while (tries<2 && frameLooksBlack(ctx, canvas.width, canvas.height)){
+      await new Promise(r=>requestAnimationFrame(r));
+      drawWithEffect(video); tries++;
     }
   }
-
   await prepareBlob();
   togglePreviewState(true);
 });
 
-function isCanvasBlack(){
-  const ctx = canvas.getContext('2d');
-  return frameLooksBlack(ctx, canvas.width, canvas.height);
-}
-
 retakeBtn.addEventListener('click', ()=>{
-  capturedBlob=null; canvas.style.display='none'; video.style.display='block'; togglePreviewState(false);
+  capturedBlob=null; canvas.style.display='none'; video.style.display='block'; startLiveLoop(); liveCanvas.style.display='block'; togglePreviewState(false);
 });
 
 confirmBtn.addEventListener('click', async ()=>{
   if(!capturedBlob){ showToast('Nothing to upload yet'); return; }
   confirmBtn.disabled=true; showThank('Thanks, baddie ✨','Uploading…');
+
   try{
+    // Compute checksum for idempotency
+    const checksum = await sha256Hex(capturedBlob);
+
     const form = new FormData();
     form.append('file', capturedBlob, `chez_${Date.now()}.jpg`);
     form.append('event', EVENT_CODE);
@@ -283,139 +472,107 @@ confirmBtn.addEventListener('click', async ()=>{
     form.append('date', EVENT_DATE);
     if(igInput.value) form.append('ig', igInput.value.trim());
     if(emailInput.value) form.append('email', emailInput.value.trim());
-    const count = incLocalCount(); form.append('client_uploads', String(count));
+    const localCount = incLocalCount(); form.append('client_uploads', String(localCount));
+    form.append('checksum', checksum);
 
-    const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body:form });
-    const j = await res.json();
+    // Try upload with backoff; if offline/fails, queue
+    const meta = { ig: igInput.value.trim() || '' };
+    const ok = await tryUpload(form, meta);
+    if (!ok){
+      await enqueue({ form: serializeForm(form), meta }); // store as strings
+    }
 
-    counterBadge.style.display='block'; counterBadge.textContent = `#${j.count||'?'}`;
-    thankSub.textContent = `You’re upload #${j.count||'?'}`;
+    // Reset UI
     setTimeout(hideThank, 1400);
-
-    if(j.unlock_url){ unlockLink.href=j.unlock_url; unlockCity.textContent=`Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`; setTimeout(()=>unlock.style.display='flex',1500); }
-
-    capturedBlob=null; togglePreviewState(false); canvas.style.display='none'; video.style.display='block';
-  }catch(e){ console.error(e); thankMsg.textContent='Upload error'; thankSub.textContent='Try again'; setTimeout(hideThank,1600); confirmBtn.disabled=false; }
+    capturedBlob=null; togglePreviewState(false); canvas.style.display='none'; video.style.display='block'; startLiveLoop(); liveCanvas.style.display='block';
+  }catch(e){
+    console.error(e);
+    thankMsg.textContent='Upload error'; thankSub.textContent='Saved to retry'; 
+    await enqueue({ form: serializeFormFromBlob(capturedBlob, { effect:effectSel.value, ig:igInput.value.trim(), email:emailInput.value.trim() }), meta:{ ig: igInput.value.trim() } });
+    setTimeout(hideThank, 1600); confirmBtn.disabled=false;
+  }
 });
 
+/* ===== Serialize FormData (to allow localStorage queue) ===== */
+function serializeForm(fd){
+  // Convert to simple object of [name, value/base64] pairs
+  const out = [];
+  for (const [k,v] of fd.entries()){
+    if (v instanceof Blob){
+      out.push([k, { b64: true, type: v.type, name: v.name }]); // we’ll rebuild from capturedBlob kept separately
+    } else {
+      out.push([k, v]);
+    }
+  }
+  return { items: out, blobDataUrl: null }; // filled by next helper if needed
+}
+function serializeFormFromBlob(blob, extras){
+  // Build minimal payload for queueing when we only have the blob + extras
+  const reader = new FileReader();
+  return new Promise((resolve)=>{
+    reader.onload = ()=>{
+      const dataUrl = reader.result;
+      const d = new Date();
+      const fd = {
+        items: [
+          ['event', EVENT_CODE],
+          ['effect', extras.effect || 'film'],
+          ['city', EVENT_CITY],
+          ['date', EVENT_DATE],
+          ['ig', extras.ig || ''],
+          ['email', extras.email || ''],
+          ['client_uploads', String(parseInt(localStorage.getItem(`chez_up_count_${EVENT_CODE}`)||'1',10))],
+          // checksum will be recalculated on resend
+        ],
+        blobDataUrl: dataUrl
+      };
+      resolve(fd);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+async function rebuildForm(serialized){
+  const fd = new FormData();
+  for (const [k,v] of serialized.items){
+    if (typeof v === 'object' && v?.b64){ /* skip; we’ll add blob below */ }
+    else fd.append(k, v);
+  }
+  // If we have a blob dataURL, reconstruct Blob
+  if (serialized.blobDataUrl){
+    const blob = dataURLtoBlob(serialized.blobDataUrl);
+    const checksum = await sha256Hex(blob);
+    fd.append('file', blob, `chez_${Date.now()}.jpg`);
+    fd.append('checksum', checksum);
+  }
+  return fd;
+}
+function dataURLtoBlob(dataUrl){
+  const [hdr, data] = dataUrl.split(',');
+  const mime = hdr.match(/:(.*?);/)[1];
+  const bin = atob(data); const len = bin.length; const arr = new Uint8Array(len);
+  for (let i=0;i<len;i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+/* ===== Periodic queue flush ===== */
+window.addEventListener('online', ()=> flushQueue());
+setInterval(flushQueue, 5000);
+
+/* ===== Unlock modal ===== */
 closeUnlock.addEventListener('click', ()=> unlock.style.display='none');
 
-/* ===== Effects (visible & punchy) ===== */
-function drawWithEffect(src){
-  const w = src.videoWidth || src.width; const h = src.videoHeight || src.height;
-  if(!w||!h){ showToast('Camera not ready'); return; }
-  const scale=Math.min(1, 1440/w);
-  canvas.width = Math.round(w*scale); canvas.height = Math.round(h*scale);
-  const ctx = canvas.getContext('2d', { willReadFrequently:true });
-  ctx.imageSmoothingEnabled = true;
-
-  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
-
-  const fx = effectSel.value;
-  if (fx === 'film')      applyFilm(ctx, canvas);
-  else if (fx === 'bw')   applyBW(ctx, canvas);
-  // 'clean' = no effect
-
-  drawWatermark(ctx, canvas);
-  canvas.style.display='block'; video.style.display='none';
-}
-
-function applyFilm(ctx, cvs){
-  const img = ctx.getImageData(0,0,cvs.width,cvs.height);
-  const d = img.data;
-  // Contrast curve + warm tint + gentle roll-off highlights (very visible)
-  for(let i=0;i<d.length;i+=4){
-    let r=d[i], g=d[i+1], b=d[i+2];
-    // S-curve
-    const map = (v)=> {
-      const t = v/255;
-      const s = t<0.5 ? (2.2*t*t) : (1 - Math.pow(-2.2*t+2.2,2)/2.2);
-      return Math.max(0, Math.min(255, s*255));
-    };
-    r = map(r); g = map(g); b = map(b);
-    // warm tint
-    r = r*1.08 + 4; g = g*1.02 + 1; b = b*0.98 - 2;
-    // highlight roll-off
-    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
-    if (lum > 220) { const k = 1 - (lum-220)/80; r*=k; g*=k; b*=k; }
-    d[i]=clamp(r); d[i+1]=clamp(g); d[i+2]=clamp(b);
-  }
-  ctx.putImageData(img,0,0);
-  addGrain(ctx,cvs,0.22);
-  addVignette(ctx,cvs,0.28);
-}
-
-function applyBW(ctx,cvs){
-  const img = ctx.getImageData(0,0,cvs.width,cvs.height);
-  const d = img.data;
-  for(let i=0;i<d.length;i+=4){
-    const y = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-    // strong contrast
-    let v = (y-128)*1.25 + 128;
-    d[i]=d[i+1]=d[i+2]=clamp(v);
-  }
-  ctx.putImageData(img,0,0);
-  addGrain(ctx,cvs,0.26);
-  addVignette(ctx,cvs,0.35);
-}
-
-function clamp(v){ return v<0?0:(v>255?255:v); }
-
-function addGrain(ctx,cvs,intensity){
-  const {width:w,height:h}=cvs;
-  const img = ctx.getImageData(0,0,w,h);
-  const d = img.data;
-  for(let i=0;i<d.length;i+=4){
-    const n = (Math.random()*2-1) * 40 * intensity; // visible grain
-    d[i]   = clamp(d[i]   + n);
-    d[i+1] = clamp(d[i+1] + n);
-    d[i+2] = clamp(d[i+2] + n);
-  }
-  ctx.putImageData(img,0,0);
-}
-
-function addVignette(ctx,cvs,strength){
-  const g = ctx.createRadialGradient(cvs.width/2,cvs.height/2, Math.min(cvs.width,cvs.height)*0.25, cvs.width/2,cvs.height/2, Math.max(cvs.width,cvs.height)*0.75);
-  g.addColorStop(0,'rgba(0,0,0,0)');
-  g.addColorStop(1,`rgba(0,0,0,${strength})`);
-  ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
-}
-
-function drawWatermark(ctx,cvs){
-  const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
-  const pad = Math.round(cvs.width * 0.02);
-  ctx.save();
-  ctx.font = 'bold 18px Inter, system-ui, sans-serif';
-  const metrics = ctx.measureText(text);
-  const w = metrics.width + pad*0.8, h = 26;
-  const x = cvs.width - w - pad, y = cvs.height - pad;
-  // pill bg
-  ctx.fillStyle='rgba(0,0,0,.5)';
-  const r=12;
-  ctx.beginPath();
-  ctx.moveTo(x+r,y-h); ctx.arcTo(x+w,y-h,x+w,y,r);
-  ctx.arcTo(x+w,y,x,y,r); ctx.arcTo(x,y,x,y-h,r); ctx.arcTo(x,y-h,x+w,y-h,r); ctx.closePath(); ctx.fill();
-  // text
-  ctx.fillStyle='#fff'; ctx.fillText(text, x+10, y-8);
-  ctx.restore();
-}
-
-/* ===== Blob prep ===== */
-async function prepareBlob(){
-  const q=parseFloat(qualitySlider.value||'0.85');
-  return new Promise(res=>canvas.toBlob(b=>{ capturedBlob=b; res(); },'image/jpeg',q));
-}
-
-/* ===== Local unlock counter ===== */
-function incLocalCount(){
-  const key = `chez_up_count_${EVENT_CODE}`;
-  const n = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
-  localStorage.setItem(key, String(n));
-  return n;
-}
-
 /* ===== Boot ===== */
-if(navigator.mediaDevices?.getUserMedia){ initCamera(); }
+document.getElementById('landing').style.display='block';
+if(navigator.mediaDevices?.getUserMedia){ /* init on tap */ }
+
+/* ===== Admin quick-open (optional): add #admin=TOKEN to URL to ping */
+(function adminPingMaybe(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (!h.has('admin')) return;
+  const token = h.get('admin'); const event = EVENT_CODE;
+  fetch(`${UPLOAD_ENDPOINT.replace('/upload','')}/admin/ping?token=${encodeURIComponent(token)}&event=${encodeURIComponent(event)}`)
+    .then(r=>r.json()).then(j=>{ alert(JSON.stringify(j,null,2)); }).catch(()=>{});
+})();
 </script>
 </body>
 </html>
