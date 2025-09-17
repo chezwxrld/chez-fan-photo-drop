@@ -115,15 +115,13 @@ input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;c
 </div>
 
 <script>
-/* ===== FRONTEND CONFIG — set per show ===== */
+/* ===== FRONTEND CONFIG ===== */
 const UPLOAD_ENDPOINT = 'https://chez-uploader.reece-lenzo.workers.dev/upload';
 const EVENT_CODE = 'chez_2025_10_22_perth';
 const EVENT_CITY = 'Perth';
 const EVENT_DATE = '22 Oct 2025';
-const UNLOCK_MIN_UPLOADS = 5; // per-fan threshold
+const UNLOCK_MIN_UPLOADS = 5;
 
-/* ===== Elements ===== */
-const landing = document.getElementById('landing');
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const badge = document.getElementById('badge');
@@ -148,29 +146,46 @@ const eventBadge = document.getElementById('eventBadge');
 const igInput = document.getElementById('ig');
 const emailInput = document.getElementById('email');
 
-let stream = null;
 let capturedBlob = null;
 
-/* ===== UI helpers ===== */
+/* === Helpers === */
 function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 2200); }
 function showThank(msg, sub){ thankMsg.textContent = msg; thankSub.textContent = sub || ''; thank.style.display = 'flex'; }
 function hideThank(){ thank.style.display = 'none'; }
 function togglePreviewState(isPreview){ retakeBtn.disabled = !isPreview; confirmBtn.disabled = !isPreview; shutterBtn.disabled = isPreview; badge.textContent = isPreview ? 'Preview' : 'Live camera'; }
 
-/* ===== Camera ===== */
+/* === Camera init === */
+async function waitForVideoReady(v) {
+  if (v.readyState >= 2 && v.videoWidth && v.videoHeight) return;
+  await new Promise(r => v.addEventListener('loadedmetadata', r, {once:true}));
+  await new Promise(r => requestAnimationFrame(r));
+}
+
 async function initCamera(){
   try{
-    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode: { ideal: 'environment' } }, audio:false });
+    video.setAttribute('playsinline','');
+    video.setAttribute('muted','');
+    video.muted = true;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
     video.srcObject = stream;
+
+    await waitForVideoReady(video);
+    await video.play();
+
     badge.textContent = 'Live camera';
   }catch(err){
-    badge.textContent = 'Camera unavailable — pick from library';
     console.error(err);
+    badge.textContent = 'Camera unavailable — pick from library';
   }
   eventBadge.textContent = `${EVENT_CITY} • ${EVENT_DATE}`;
 }
 
-startBtn.addEventListener('click', async ()=>{ await initCamera(); landing.style.display='none'; });
+/* === Events === */
+startBtn.addEventListener('click', ()=>{ initCamera(); document.getElementById('landing').style.display='none'; });
 libraryBtn.addEventListener('click', ()=> fileInput.click());
 
 fileInput.addEventListener('change', async (e)=>{
@@ -179,149 +194,66 @@ fileInput.addEventListener('change', async (e)=>{
 });
 
 shutterBtn.addEventListener('click', async ()=>{
-  if(!video.videoWidth){ showToast('Camera not ready yet'); return; }
-  drawWithEffect(video); await prepareBlob(); togglePreviewState(true);
+  if (!video.videoWidth) await waitForVideoReady(video);
+  drawWithEffect(video);
+  await prepareBlob();
+  togglePreviewState(true);
 });
 
-retakeBtn.addEventListener('click', ()=>{
-  capturedBlob=null; canvas.style.display='none'; video.style.display='block';
-  togglePreviewState(false); badge.textContent = 'Live camera';
-});
+retakeBtn.addEventListener('click', ()=>{ capturedBlob=null; canvas.style.display='none'; video.style.display='block'; togglePreviewState(false); });
 
-/* ===== Upload ===== */
 confirmBtn.addEventListener('click', async ()=>{
   if(!capturedBlob){ showToast('Nothing to upload yet'); return; }
-  confirmBtn.disabled = true; showThank('Thanks, baddie ✨', 'Uploading your shot…');
+  confirmBtn.disabled=true; showThank('Thanks, baddie ✨','Uploading…');
   try{
     const form = new FormData();
-    const filename = `chez_${Date.now()}.jpg`;
-    form.append('file', capturedBlob, filename);
+    form.append('file', capturedBlob, `chez_${Date.now()}.jpg`);
     form.append('event', EVENT_CODE);
     form.append('effect', effectSel.value);
     form.append('city', EVENT_CITY);
     form.append('date', EVENT_DATE);
     if(igInput.value) form.append('ig', igInput.value.trim());
     if(emailInput.value) form.append('email', emailInput.value.trim());
+    const count = incLocalCount(); form.append('client_uploads', String(count));
 
-    // per-fan counter in localStorage
-    const localCount = incLocalCount();
-    form.append('client_uploads', String(localCount));
+    const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body:form });
+    const j = await res.json();
+    counterBadge.style.display='block'; counterBadge.textContent = `#${j.count||'?'}`;
+    thankSub.textContent = `You’re upload #${j.count||'?'}`;
+    setTimeout(hideThank, 1400);
 
-    const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body: form });
-    if(!res.ok) throw new Error(`Upload failed: ${res.status}`);
-    const json = await res.json();
-
-    counterBadge.style.display='block';
-    counterBadge.textContent = `#${json.count || '?'}`;
-    thankSub.textContent = `You’re upload #${json.count || '?'} tonight!`;
-
-    setTimeout(()=>{ hideThank(); }, 1400);
-
-    // Unlock logic
-    if(json.unlock_url){
-      unlockLink.href = json.unlock_url;
-      unlockCity.textContent = `Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`;
-      setTimeout(()=> unlock.style.display='flex', 1500);
-    }
-
-    // reset
-    capturedBlob = null; retakeBtn.disabled = true; confirmBtn.disabled = true; shutterBtn.disabled = false;
-    badge.textContent = 'Live camera'; canvas.style.display='none'; video.style.display='block';
-  }catch(e){
-    console.error(e);
-    thankMsg.textContent='Upload error'; thankSub.textContent='Please try again';
-    setTimeout(()=> hideThank(), 1600); confirmBtn.disabled=false;
-  }
+    if(j.unlock_url){ unlockLink.href=j.unlock_url; unlockCity.textContent=`Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`; setTimeout(()=>unlock.style.display='flex',1500); }
+    capturedBlob=null; togglePreviewState(false); canvas.style.display='none'; video.style.display='block';
+  }catch(e){ console.error(e); thankMsg.textContent='Upload error'; thankSub.textContent='Try again'; setTimeout(hideThank,1600); confirmBtn.disabled=false; }
 });
 
-closeUnlock.addEventListener('click', ()=>{ unlock.style.display='none'; });
+closeUnlock.addEventListener('click', ()=> unlock.style.display='none');
 
-/* ===== Effects + watermark ===== */
-function drawWithEffect(source){
-  const w = source.videoWidth || source.width || 1080;
-  const h = source.videoHeight || source.height || 1440;
-  const maxW = 1440; const scale = Math.min(1, maxW / w);
-  canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+/* === Effects === */
+function drawWithEffect(src){
+  const w = src.videoWidth || src.width; const h = src.videoHeight || src.height;
+  if(!w||!h){ showToast('Camera not ready'); return; }
+  const scale=Math.min(1,1440/w); canvas.width=w*scale; canvas.height=h*scale;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(src,0,0,canvas.width,canvas.height);
+  if(effectSel.value==='film') applyFilm(ctx,canvas);
+  if(effectSel.value==='bw') applyBW(ctx,canvas);
+  drawWatermark(ctx,canvas); canvas.style.display='block'; video.style.display='none';
+}
+function applyFilm(ctx,c){/* quick film effect */addGrain(ctx,c,0.18);addVignette(ctx,c,0.25);}
+function applyBW(ctx,c){const img=ctx.getImageData(0,0,c.width,c.height);const d=img.data;for(let i=0;i<d.length;i+=4){const y=0.3*d[i]+0.59*d[i+1]+0.11*d[i+2];d[i]=d[i+1]=d[i+2]=y;}ctx.putImageData(img,0,0);addGrain(ctx,c,0.22);addVignette(ctx,c,0.3);}
+function addGrain(ctx,c,int){const id=ctx.createImageData(c.width,c.height);for(let i=0;i<id.data.length;i+=4){const n=(Math.random()*255-128)*int;id.data[i]=id.data[i+1]=id.data[i+2]=128+n;id.data[i+3]=25;}ctx.putImageData(id,0,0);}
+function addVignette(ctx,c,s){const g=ctx.createRadialGradient(c.width/2,c.height/2,Math.min(c.width,c.height)*0.2,c.width/2,c.height/2,Math.max(c.width,c.height)*0.7);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${s})`);ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);}
+function drawWatermark(ctx,c){ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(c.width-200,c.height-30,190,24);ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.fillText(`CHEZ • ${EVENT_CITY} ${EVENT_DATE}`,c.width-190,c.height-12);}
 
-  const effect = effectSel.value;
-  if(effect === 'film'){ applyFilm(ctx, canvas); }
-  else if(effect === 'bw'){ applyBW(ctx, canvas); }
-  // watermark
-  drawWatermark(ctx, canvas);
+/* === Blob === */
+async function prepareBlob(){const q=parseFloat(qualitySlider.value||'0.85');return new Promise(r=>canvas.toBlob(b=>{capturedBlob=b;r();},'image/jpeg',q));}
 
-  canvas.style.display='block'; video.style.display='none';
-}
+/* === Local counter === */
+function incLocalCount(){const k=`chez_up_count_${EVENT_CODE}`;const n=parseInt(localStorage.getItem(k)||'0',10)+1;localStorage.setItem(k,n);return n;}
 
-function applyFilm(ctx, cvs){
-  const imgData = ctx.getImageData(0,0,cvs.width,cvs.height); const d = imgData.data;
-  for(let i=0;i<d.length;i+=4){
-    let r=d[i], g=d[i+1], b=d[i+2];
-    r = curve(r); g = curve(g); b = curve(b);
-    r=r*1.05; g=g*1.02; b=b*0.98;
-    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
-    const roll = (lum>220)? (1 - Math.min(1,(lum-220)/35))*0.15 : 1.0;
-    d[i]=clamp(r*roll); d[i+1]=clamp(g*roll); d[i+2]=clamp(b*roll);
-  }
-  ctx.putImageData(imgData,0,0);
-  addGrain(ctx, cvs, 0.18); addVignette(ctx, cvs, 0.25); halation(ctx, cvs, 0.12);
-}
-function applyBW(ctx, cvs){
-  const imgData = ctx.getImageData(0,0,cvs.width,cvs.height); const d = imgData.data;
-  for(let i=0;i<d.length;i+=4){
-    const y = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-    let v = curve(y*1.05); d[i]=d[i+1]=d[i+2]=clamp(v);
-  }
-  ctx.putImageData(imgData,0,0); addGrain(ctx, cvs, 0.22); addVignette(ctx, cvs, 0.3);
-}
-function curve(x){ const t = x/255; const y = t*(1.2-t*0.2); return y*255; }
-function clamp(v){ return Math.max(0, Math.min(255, v)); }
-function addGrain(ctx, cvs, intensity){
-  const {width:w, height:h} = cvs; const g = ctx.createImageData(w,h); const d = g.data;
-  for(let i=0;i<d.length;i+=4){ const n = (Math.random()*2-1) * 255 * intensity; d[i]=d[i+1]=d[i+2]=128 + n; d[i+3]=25; }
-  ctx.globalCompositeOperation='overlay'; ctx.putImageData(g,0,0); ctx.globalCompositeOperation='source-over';
-}
-function addVignette(ctx, cvs, strength){
-  const {width:w,height:h}=cvs; const grd=ctx.createRadialGradient(w/2,h/2, Math.min(w,h)*0.2, w/2,h/2, Math.max(w,h)*0.7);
-  grd.addColorStop(0,'rgba(0,0,0,0)'); grd.addColorStop(1,`rgba(0,0,0,${strength})`);
-  ctx.fillStyle=grd; ctx.fillRect(0,0,w,h);
-}
-function halation(ctx, cvs, amount){
-  const {width:w,height:h}=cvs; const tmp=document.createElement('canvas'); tmp.width=w; tmp.height=h; const tctx=tmp.getContext('2d');
-  tctx.drawImage(cvs,0,0); tctx.globalCompositeOperation='screen'; tctx.filter='blur(3px)'; tctx.drawImage(cvs,0,0,w,h); tctx.filter='none';
-  ctx.globalAlpha = amount; ctx.drawImage(tmp,0,0); ctx.globalAlpha=1;
-}
-function drawWatermark(ctx, cvs){
-  const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
-  const pad = Math.round(cvs.width * 0.02);
-  ctx.save();
-  const m = measureText(ctx, text, 'bold 18px Inter, sans-serif');
-  const x = cvs.width - m.width - pad*1.5; const y = cvs.height - pad*1.2;
-  const w = m.width + pad; const h = m.actualHeight + pad*0.6;
-  roundRect(ctx, x-pad*0.5, y-h*0.85, w, h, 10, 'rgba(0,0,0,.45)');
-  ctx.font = 'bold 18px Inter, sans-serif'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.92; ctx.fillText(text, x, y);
-  ctx.restore();
-}
-function measureText(ctx, text, font){ ctx.font = font; const met = ctx.measureText(text); const actualHeight = met.actualBoundingBoxAscent + met.actualBoundingBoxDescent || 22; return { width: met.width, actualHeight }; }
-function roundRect(ctx, x, y, w, h, r, fill){ ctx.beginPath(); ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r); ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
-
-/* ===== Blob prep ===== */
-async function prepareBlob(){
-  const q = parseFloat(qualitySlider.value || '0.85');
-  return new Promise(res=> canvas.toBlob(b=>{ capturedBlob=b; res(); }, 'image/jpeg', q));
-}
-
-/* ===== Local unlock counter ===== */
-function incLocalCount(){
-  const key = `chez_up_count_${EVENT_CODE}`;
-  const n = parseInt(localStorage.getItem(key)||'0',10)+1;
-  localStorage.setItem(key, String(n));
-  return n;
-}
-
-/* ===== Boot ===== */
-if(navigator.mediaDevices?.getUserMedia){ initCamera().catch(()=>{}); }
+/* === Boot === */
+if(navigator.mediaDevices?.getUserMedia){ initCamera(); }
 </script>
 </body>
 </html>
