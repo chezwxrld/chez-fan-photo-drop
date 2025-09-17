@@ -37,6 +37,11 @@ video,canvas{width:100%;height:auto;display:block}
 .ach{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#16161e;border:1px solid #444;color:#fff;padding:8px 12px;border-radius:12px;display:none;z-index:95}
 .toggle{display:flex;gap:8px;align-items:center}
 .input{width:100%;background:#0f0f15;border:1px solid #2e2e3a;color:#fff;border-radius:12px;padding:12px}
+
+/* ensure PREVIEW overlays the live layer */
+#canvas { position:absolute; inset:0; width:100%; height:100%; display:none; z-index:3 }
+#liveCanvas { position:absolute; inset:0; width:100%; height:100%; display:none; z-index:2 }
+#video { position:relative; z-index:1 }
 </style>
 </head>
 <body>
@@ -61,11 +66,9 @@ video,canvas{width:100%;height:auto;display:block}
       <div class="overlayBadge" id="badge">Live camera</div>
       <div class="counterBadge" id="counter">#1</div>
       <div class="progressRing" id="ring"></div>
-      <!-- Live canvas overlays the video; video stays visible (iOS requirement) -->
-      <canvas id="liveCanvas" style="position:absolute;inset:0;width:100%;height:100%;display:none"></canvas>
-      <video id="video" playsinline autoplay muted style="opacity:1"></video>
-      <!-- Final captured image -->
-      <canvas id="canvas" style="display:none"></canvas>
+      <canvas id="liveCanvas"></canvas>
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="canvas"></canvas>
     </div>
     <div class="card">
       <h1>Controls</h1>
@@ -90,7 +93,7 @@ video,canvas{width:100%;height:auto;display:block}
         </div>
         <div>
           <label class="small">Quality:</label>
-          <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.85"/>
+          <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.8"/>
         </div>
       </div>
 
@@ -107,7 +110,6 @@ video,canvas{width:100%;height:auto;display:block}
 <div class="toast" id="toast"></div>
 <div class="ach" id="ach"></div>
 
-<!-- Thank-you overlay -->
 <div class="thank" id="thank">
   <div class="panel">
     <div id="thankMsg" style="font-size:1.1rem;margin-bottom:8px">Thanks, baddie ✨</div>
@@ -115,7 +117,6 @@ video,canvas{width:100%;height:auto;display:block}
   </div>
 </div>
 
-<!-- Unlockable modal -->
 <div class="unlock" id="unlock">
   <div class="panel">
     <h2 style="margin-top:0">🎁 You unlocked a secret CHEZ demo</h2>
@@ -127,12 +128,13 @@ video,canvas{width:100%;height:auto;display:block}
 
 <script>
 /*** CONFIG ***/
+// 🔴 make sure this matches your Worker exactly:
 const UPLOAD_ENDPOINT = 'https://chez-uploader.reece-lenzo.workers.dev/upload';
 const UNLOCK_MIN_UPLOADS = 5;
 
 /*** Elements ***/
 const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');        // final captured
+const canvas = document.getElementById('canvas');        // final captured (OVERLAY)
 const liveCanvas = document.getElementById('liveCanvas'); // live preview overlay
 const badge = document.getElementById('badge');
 const counterBadge = document.getElementById('counter');
@@ -202,9 +204,7 @@ function applyUnifiedLook(ctx, cvs, fx) {
     ctx.globalCompositeOperation = 'overlay';
     ctx.fillStyle = tint;
     ctx.fillRect(0, 0, cvs.width, cvs.height);
-
     addUnifiedVignette(ctx, cvs, vignette);
-
     ensureNoise();
     ctx.globalAlpha = grainAlpha;
     ctx.globalCompositeOperation = 'overlay';
@@ -215,7 +215,6 @@ function applyUnifiedLook(ctx, cvs, fx) {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    return;
   }
 
   if (fx === 'bw') {
@@ -234,6 +233,26 @@ function showThank(msg, sub){ thankMsg.textContent = msg; thankSub.textContent =
 function hideThank(){ thank.style.display = 'none'; }
 function togglePreviewState(isPreview){ retakeBtn.disabled = !isPreview; confirmBtn.disabled = !isPreview; shutterBtn.disabled = isPreview; badge.textContent = isPreview ? 'Preview' : 'Live camera'; }
 function setRing(pct){ ring.style.setProperty('--p', `${Math.max(2, Math.min(98, pct))}%`); }
+
+/*** Progress ring animation during fetch (since fetch has no native progress) ***/
+let ringAnim = null;
+function ringStart() {
+  if (ringAnim) return;
+  ring.style.display = 'block';
+  let t0 = performance.now();
+  ringAnim = () => {
+    const t = (performance.now() - t0) / 1000;
+    const p = 5 + 80 * (1 - Math.exp(-t * 1.5)); // ease to ~85%
+    setRing(p);
+    ringAnim && requestAnimationFrame(ringAnim);
+  };
+  requestAnimationFrame(ringAnim);
+}
+function ringStop(success=true) {
+  if (ringAnim) ringAnim = null;
+  if (success) { setRing(100); setTimeout(()=>{ ring.style.display='none'; setRing(0); }, 250); }
+  else { ring.style.display='none'; setRing(0); }
+}
 
 /*** City + date (offline-safe) ***/
 (function setEventMeta(){
@@ -255,7 +274,6 @@ async function waitForVideoReady(v){
 async function initCamera(){
   try{
     video.setAttribute('playsinline',''); video.setAttribute('muted',''); video.muted = true;
-
     const constraints = { video:{ facingMode:{ ideal:'environment' } }, audio:false };
     if (lowlight.checked) constraints.video.advanced = [{ torch:true }];
 
@@ -277,7 +295,7 @@ async function initCamera(){
   }
 }
 
-/*** Live preview (video FIRST, then overlays) ***/
+/*** Live preview ***/
 function setupLiveCanvas(){
   const vw = video.videoWidth || 1080, vh = video.videoHeight || 1440;
   liveCanvas.width = vw; liveCanvas.height = vh;
@@ -286,8 +304,8 @@ function setupLiveCanvas(){
 }
 function startLiveLoop(){ if (!liveRunning){ liveRunning = true; requestAnimationFrame(liveTick); } }
 function stopLiveLoop(){ liveRunning = false; }
-
 function regenNoise(){
+  if (!noiseCanvas) return;
   const w=noiseCanvas.width,h=noiseCanvas.height; const id=noiseCtx.createImageData(w,h); const d=id.data;
   for(let i=0;i<d.length;i+=4){ const n = 127 + (Math.random()*256 - 128); d[i]=d[i+1]=d[i+2]=n; d[i+3]=255; }
   noiseCtx.putImageData(id,0,0);
@@ -309,14 +327,13 @@ function liveTick(){
   const avg = sum/(sample.length/4);
 
   if (avg > 5) {
-    // keep grain movement subtle; update every 5 frames
     if ((noiseTick++ % 5)===0) regenNoise();
     applyUnifiedLook(liveCtx, liveCanvas, effectSel.value);
   }
   requestAnimationFrame(liveTick);
 }
 
-/*** Capture (takePhoto → grabFrame → video draw with retry) ***/
+/*** Capture helpers ***/
 async function captureBitmap(){
   const track = video.srcObject?.getVideoTracks?.()[0];
   if (track && 'ImageCapture' in window) {
@@ -335,19 +352,17 @@ function frameLooksBlack(ctx, w, h){
 async function drawWithEffect(src){
   const w = src.videoWidth || src.width; const h = src.videoHeight || src.height;
   if(!w||!h){ showToast('Camera not ready'); return; }
-  const scale=Math.min(1,1440/w); canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
+  const long = Math.max(w,h), target = 1280;
+  const scale=Math.min(1,target/long);
+  canvas.width=Math.round(w*scale); canvas.height=Math.round(h*scale);
   const ctx=canvas.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=true;
 
-  // draw raw frame then apply the SAME overlays as live
   ctx.drawImage(src,0,0,canvas.width,canvas.height);
   applyUnifiedLook(ctx, canvas, effectSel.value);
-
-  // watermark after the look
   drawWatermark(ctx,canvas);
 
   canvas.style.display='block'; liveCanvas.style.display='none'; stopLiveLoop();
 }
-
 function drawWatermark(ctx,cvs){
   const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
   const pad = Math.round(cvs.width*0.02);
@@ -356,20 +371,17 @@ function drawWatermark(ctx,cvs){
   ctx.fillStyle='rgba(0,0,0,.5)'; const r=12; ctx.beginPath(); ctx.moveTo(x+r,y-h); ctx.arcTo(x+w,y-h,x+w,y,r); ctx.arcTo(x+w,y,x,y,r); ctx.arcTo(x,y,x,y-h,r); ctx.arcTo(x,y-h,x+w,y-h,r); ctx.closePath(); ctx.fill();
   ctx.fillStyle='#fff'; ctx.fillText(text, x+10, y-8); ctx.restore();
 }
-
 async function prepareBlob(){
-  const q=parseFloat(qualitySlider.value||'0.85');
+  const q=parseFloat(qualitySlider.value||'0.8');
   return new Promise(res=>canvas.toBlob(b=>{ capturedBlob=b; res(); },'image/jpeg',q));
 }
-
-/*** SHA-256 checksum (for Worker idempotency) ***/
 async function sha256Hex(blob){
   const buf = await blob.arrayBuffer();
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-/*** Local achievements & unlock counter ***/
+/*** Local achievements ***/
 function incLocalCount(){
   const key = `chez_up_count_${EVENT_CODE}`;
   const n = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
@@ -380,7 +392,7 @@ function incLocalCount(){
   return n;
 }
 
-/*** Offline queue with backoff + serialize ***/
+/*** Offline queue (unchanged core) ***/
 const QKEY = 'chez_offline_queue';
 function loadQueue(){ try{ return JSON.parse(localStorage.getItem(QKEY)||'[]'); }catch{return []} }
 function saveQueue(q){ localStorage.setItem(QKEY, JSON.stringify(q.slice(0,5))); }
@@ -417,28 +429,38 @@ async function flushQueue(){
 window.addEventListener('online', ()=> flushQueue());
 setInterval(flushQueue, 5000);
 
-/*** Upload with progress ring + retry backoff ***/
+/*** Upload with progress ring + error surfacing ***/
 async function tryUpload(form, meta){
   const max = 3;
   for (let i=0;i<max;i++){
     try{
-      ring.style.display='block'; setRing((i/max)*100);
+      ringStart();
       const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body:form });
-      const j = await res.json();
-      ring.style.display='none'; setRing(0);
-      if (!res.ok || !j.ok) throw new Error(j.error||('HTTP '+res.status));
+      let payload = null;
+      try { payload = await res.json(); } catch { payload = null; }
+      ringStop(res.ok && payload?.ok);
 
-      counterBadge.style.display='block'; counterBadge.textContent = `#${j.count||'?'}`;
-      thankSub.textContent = `You’re upload #${j.count||'?'}`;
+      if (!res.ok || !payload?.ok) {
+        const msg = payload?.error || (`HTTP ${res.status}`);
+        showToast(msg);
+        throw new Error(msg);
+      }
 
-      if (j.unlock_url){ unlockLink.href=j.unlock_url; unlockCity.textContent=`Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`; setTimeout(()=>unlock.style.display='flex',1200); }
+      counterBadge.style.display='block';
+      counterBadge.textContent = `#${payload.count||'?'}`;
+      thankSub.textContent = `You’re upload #${payload.count||'?'}`;
 
-      if (meta?.ig){ try{ await navigator.clipboard.writeText(meta.ig); showToast('IG copied for credit'); }catch{} }
+      if (payload.unlock_url){
+        unlockLink.href = payload.unlock_url;
+        unlockCity.textContent = `Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`;
+        setTimeout(()=>unlock.style.display='flex', 1200);
+      }
+
+      if (meta?.ig){ try{ await navigator.clipboard.writeText(meta.ig); }catch{} }
       return true;
     }catch(e){
-      await new Promise(r=>setTimeout(r, 700 * Math.pow(2,i))); // 0.7s, 1.4s, 2.8s
-    }finally{
-      ring.style.display='none'; setRing(0);
+      ringStop(false);
+      await new Promise(r=>setTimeout(r, 700 * Math.pow(2,i)));
     }
   }
   return false;
@@ -457,24 +479,12 @@ fileInput.addEventListener('change', async (e)=>{
     const img = await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=fr.result; }; fr.onerror=rej; fr.readAsDataURL(file); });
     await drawWithEffect(img);
   } else { await drawWithEffect(bmp); }
-  await prepareBlob(); togglePreviewState(true);
+  await prepareBlob();
+  if (!capturedBlob || !capturedBlob.size) { showToast('Capture failed — try again'); return; }
+  togglePreviewState(true);
 });
 
-async function captureBitmap(){
-  const track = video.srcObject?.getVideoTracks?.()[0];
-  if (track && 'ImageCapture' in window) {
-    try { const ic = new ImageCapture(track); if (ic.takePhoto){ const blob=await ic.takePhoto(); return await createImageBitmap(blob); } } catch {}
-    try { const ic2 = new ImageCapture(track); if (ic2.grabFrame){ return await ic2.grabFrame(); } } catch {}
-  }
-  return null;
-}
-function frameLooksBlack(ctx, w, h){
-  const d = ctx.getImageData(Math.max(0,w-16), Math.max(0,h-16), Math.min(16,w), Math.min(16,h)).data;
-  let sum=0; for(let i=0;i<d.length;i+=4){ sum += 0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2]; }
-  return (sum/(d.length/4)) < 2;
-}
-
-shutterBtn.addEventListener('click', async ()=>{
+async function captureFlow(){
   if (!video.videoWidth) await waitForVideoReady(video);
   let bmp = await captureBitmap();
   if (bmp){ await drawWithEffect(bmp); }
@@ -486,15 +496,19 @@ shutterBtn.addEventListener('click', async ()=>{
       await new Promise(r=>requestAnimationFrame(r));
     }
   }
-  await prepareBlob(); togglePreviewState(true);
-});
+  await prepareBlob();
+  if (!capturedBlob || !capturedBlob.size) { showToast('Capture failed — try again'); return; }
+  togglePreviewState(true);
+}
+
+shutterBtn.addEventListener('click', captureFlow);
 
 retakeBtn.addEventListener('click', ()=>{
   capturedBlob=null; canvas.style.display='none'; liveCanvas.style.display='block'; startLiveLoop(); togglePreviewState(false);
 });
 
 confirmBtn.addEventListener('click', async ()=>{
-  if(!capturedBlob){ showToast('Nothing to upload yet'); return; }
+  if(!capturedBlob || !capturedBlob.size){ showToast('Nothing to upload yet'); return; }
   confirmBtn.disabled=true; showThank('Thanks, baddie ✨','Uploading…');
 
   try{
@@ -502,6 +516,7 @@ confirmBtn.addEventListener('click', async ()=>{
     const localCount = incLocalCount();
 
     const form = new FormData();
+    // 🔴 the Worker expects the field name 'file'
     form.append('file', capturedBlob, `chez_${Date.now()}.jpg`);
     form.append('event', EVENT_CODE);
     form.append('effect', effectSel.value);
@@ -514,6 +529,7 @@ confirmBtn.addEventListener('click', async ()=>{
 
     const ok = await tryUpload(form, { ig: igInput.value.trim() || '' });
     if (!ok){
+      // serialize for queue
       const reader = new FileReader();
       reader.onload = async () => {
         const serialized = {
@@ -526,7 +542,7 @@ confirmBtn.addEventListener('click', async ()=>{
             ['email', emailInput.value.trim() || ''],
             ['client_uploads', String(localCount)]
           ],
-          blobDataUrl: reader.result
+            blobDataUrl: reader.result
         };
         await enqueue(serialized, { ig: igInput.value.trim() || '' });
       };
@@ -557,6 +573,8 @@ confirmBtn.addEventListener('click', async ()=>{
       setTimeout(hideThank, 1400); confirmBtn.disabled=false;
     };
     reader.readAsDataURL(capturedBlob);
+  } finally {
+    confirmBtn.disabled=false;
   }
 });
 </script>
