@@ -23,11 +23,11 @@ video,canvas{width:100%;height:auto;display:block}
 .counterBadge{position:absolute;top:12px;right:12px;font-size:.8rem;background:rgba(255,77,141,.85);padding:6px 10px;border-radius:999px;color:#fff;display:none}
 .controls{display:flex;gap:12px;align-items:center;justify-content:center;padding:12px}
 .hint{font-size:.85rem;color:var(--muted)}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#101012;color:#fff;border:1px solid #2a2a35;padding:10px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .25s ease}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#101012;color:#fff;border:1px solid #2a2a35;padding:10px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .25s ease;z-index:90}
 .toast.show{opacity:1}.small{font-size:.8rem;color:#9aa}
-.thank{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:50}
+.thank{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:80}
 .thank .panel{background:var(--card);border:1px solid #333;border-radius:18px;padding:20px 22px;max-width:420px;text-align:center}
-.unlock{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:60}
+.unlock{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:85}
 .unlock .panel{background:#16161e;border:1px solid #444;border-radius:18px;padding:22px 24px;max-width:480px;text-align:center}
 .form{display:grid;gap:10px;margin-top:8px}.field{display:grid;gap:6px}
 input[type=text],input[type=email]{background:#0f0f15;border:1px solid #2e2e3a;color:#fff;border-radius:12px;padding:12px}
@@ -122,6 +122,7 @@ const EVENT_CITY = 'Perth';
 const EVENT_DATE = '22 Oct 2025';
 const UNLOCK_MIN_UPLOADS = 5;
 
+/* ===== Elements ===== */
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const badge = document.getElementById('badge');
@@ -148,34 +149,31 @@ const emailInput = document.getElementById('email');
 
 let capturedBlob = null;
 
-/* === Helpers === */
+/* ===== UI helpers ===== */
 function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 2200); }
 function showThank(msg, sub){ thankMsg.textContent = msg; thankSub.textContent = sub || ''; thank.style.display = 'flex'; }
 function hideThank(){ thank.style.display = 'none'; }
 function togglePreviewState(isPreview){ retakeBtn.disabled = !isPreview; confirmBtn.disabled = !isPreview; shutterBtn.disabled = isPreview; badge.textContent = isPreview ? 'Preview' : 'Live camera'; }
 
-/* === Camera init === */
+/* ===== Camera ===== */
 async function waitForVideoReady(v) {
   if (v.readyState >= 2 && v.videoWidth && v.videoHeight) return;
-  await new Promise(r => v.addEventListener('loadedmetadata', r, {once:true}));
+  await new Promise(r => v.addEventListener('loadedmetadata', r, { once:true }));
   await new Promise(r => requestAnimationFrame(r));
+  // sometimes needs another frame
+  if (!v.videoWidth) await new Promise(r => v.addEventListener('loadeddata', r, { once:true }));
 }
 
 async function initCamera(){
   try{
-    video.setAttribute('playsinline','');
-    video.setAttribute('muted','');
-    video.muted = true;
-
+    video.setAttribute('playsinline',''); video.setAttribute('muted',''); video.muted = true;
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' } },
       audio: false
     });
     video.srcObject = stream;
-
     await waitForVideoReady(video);
     await video.play();
-
     badge.textContent = 'Live camera';
   }catch(err){
     console.error(err);
@@ -184,23 +182,94 @@ async function initCamera(){
   eventBadge.textContent = `${EVENT_CITY} • ${EVENT_DATE}`;
 }
 
-/* === Events === */
+/* ===== Capture helpers (robust for iOS + Android) ===== */
+async function captureFrameBitmap(){
+  const track = video.srcObject?.getVideoTracks?.()[0];
+  if (!track) return null;
+
+  // Prefer takePhoto (produces oriented, full-res blobs on many Androids)
+  if ('ImageCapture' in window) {
+    try {
+      const ic = new ImageCapture(track);
+      if (ic.takePhoto) {
+        const blob = await ic.takePhoto();
+        return await createImageBitmap(blob);
+      }
+    } catch(e) { /* ignore & try grabFrame */ }
+    try {
+      const ic2 = new ImageCapture(track);
+      if (ic2.grabFrame) return await ic2.grabFrame();
+    } catch(e) { /* ignore */ }
+  }
+  return null; // caller will fall back to video draw
+}
+
+function frameLooksBlack(ctx, w, h){
+  // sample a small grid to detect a black draw
+  const sample = ctx.getImageData(Math.max(0,w-16), Math.max(0,h-16), Math.min(16,w), Math.min(16,h)).data;
+  let sum = 0; for(let i=0;i<sample.length;i+=4){ sum += sample[i]*0.2126 + sample[i+1]*0.7152 + sample[i+2]*0.0722; }
+  const avg = sum / (sample.length/4);
+  return avg < 2; // essentially black
+}
+
+/* ===== Events ===== */
 startBtn.addEventListener('click', ()=>{ initCamera(); document.getElementById('landing').style.display='none'; });
 libraryBtn.addEventListener('click', ()=> fileInput.click());
 
 fileInput.addEventListener('change', async (e)=>{
   const file = e.target.files?.[0];
-  if(file){ const img = await createImageBitmap(file); drawWithEffect(img); await prepareBlob(); togglePreviewState(true); }
-});
-
-shutterBtn.addEventListener('click', async ()=>{
-  if (!video.videoWidth) await waitForVideoReady(video);
-  drawWithEffect(video);
+  if(!file) return;
+  let bmp = null;
+  if ('createImageBitmap' in window) {
+    try { bmp = await createImageBitmap(file); } catch {}
+  }
+  if (!bmp) {
+    // Fallback for older iOS: FileReader -> HTMLImageElement
+    const img = await new Promise((res, rej)=>{
+      const fr = new FileReader();
+      fr.onload = ()=>{ const im = new Image(); im.onload = ()=>res(im); im.onerror = rej; im.src = fr.result; };
+      fr.onerror = rej; fr.readAsDataURL(file);
+    });
+    drawWithEffect(img);
+  } else {
+    drawWithEffect(bmp);
+  }
   await prepareBlob();
   togglePreviewState(true);
 });
 
-retakeBtn.addEventListener('click', ()=>{ capturedBlob=null; canvas.style.display='none'; video.style.display='block'; togglePreviewState(false); });
+shutterBtn.addEventListener('click', async ()=>{
+  if (!video.videoWidth) await waitForVideoReady(video);
+
+  // Try robust camera-track capture first
+  let bmp = await captureFrameBitmap();
+
+  if (bmp) {
+    drawWithEffect(bmp);
+  } else {
+    // Fallback: draw from <video>, retry if black (iOS quirk)
+    drawWithEffect(video);
+    // If black, wait a couple animation frames and retry up to 2 times
+    let tries = 0;
+    while (tries < 2 && isCanvasBlack()) {
+      await new Promise(r => requestAnimationFrame(r));
+      drawWithEffect(video);
+      tries++;
+    }
+  }
+
+  await prepareBlob();
+  togglePreviewState(true);
+});
+
+function isCanvasBlack(){
+  const ctx = canvas.getContext('2d');
+  return frameLooksBlack(ctx, canvas.width, canvas.height);
+}
+
+retakeBtn.addEventListener('click', ()=>{
+  capturedBlob=null; canvas.style.display='none'; video.style.display='block'; togglePreviewState(false);
+});
 
 confirmBtn.addEventListener('click', async ()=>{
   if(!capturedBlob){ showToast('Nothing to upload yet'); return; }
@@ -218,41 +287,134 @@ confirmBtn.addEventListener('click', async ()=>{
 
     const res = await fetch(UPLOAD_ENDPOINT, { method:'POST', body:form });
     const j = await res.json();
+
     counterBadge.style.display='block'; counterBadge.textContent = `#${j.count||'?'}`;
     thankSub.textContent = `You’re upload #${j.count||'?'}`;
     setTimeout(hideThank, 1400);
 
     if(j.unlock_url){ unlockLink.href=j.unlock_url; unlockCity.textContent=`Unlocked in ${EVENT_CITY} • ${EVENT_DATE}`; setTimeout(()=>unlock.style.display='flex',1500); }
+
     capturedBlob=null; togglePreviewState(false); canvas.style.display='none'; video.style.display='block';
   }catch(e){ console.error(e); thankMsg.textContent='Upload error'; thankSub.textContent='Try again'; setTimeout(hideThank,1600); confirmBtn.disabled=false; }
 });
 
 closeUnlock.addEventListener('click', ()=> unlock.style.display='none');
 
-/* === Effects === */
+/* ===== Effects (visible & punchy) ===== */
 function drawWithEffect(src){
   const w = src.videoWidth || src.width; const h = src.videoHeight || src.height;
   if(!w||!h){ showToast('Camera not ready'); return; }
-  const scale=Math.min(1,1440/w); canvas.width=w*scale; canvas.height=h*scale;
-  const ctx=canvas.getContext('2d',{willReadFrequently:true});
-  ctx.drawImage(src,0,0,canvas.width,canvas.height);
-  if(effectSel.value==='film') applyFilm(ctx,canvas);
-  if(effectSel.value==='bw') applyBW(ctx,canvas);
-  drawWatermark(ctx,canvas); canvas.style.display='block'; video.style.display='none';
+  const scale=Math.min(1, 1440/w);
+  canvas.width = Math.round(w*scale); canvas.height = Math.round(h*scale);
+  const ctx = canvas.getContext('2d', { willReadFrequently:true });
+  ctx.imageSmoothingEnabled = true;
+
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+
+  const fx = effectSel.value;
+  if (fx === 'film')      applyFilm(ctx, canvas);
+  else if (fx === 'bw')   applyBW(ctx, canvas);
+  // 'clean' = no effect
+
+  drawWatermark(ctx, canvas);
+  canvas.style.display='block'; video.style.display='none';
 }
-function applyFilm(ctx,c){/* quick film effect */addGrain(ctx,c,0.18);addVignette(ctx,c,0.25);}
-function applyBW(ctx,c){const img=ctx.getImageData(0,0,c.width,c.height);const d=img.data;for(let i=0;i<d.length;i+=4){const y=0.3*d[i]+0.59*d[i+1]+0.11*d[i+2];d[i]=d[i+1]=d[i+2]=y;}ctx.putImageData(img,0,0);addGrain(ctx,c,0.22);addVignette(ctx,c,0.3);}
-function addGrain(ctx,c,int){const id=ctx.createImageData(c.width,c.height);for(let i=0;i<id.data.length;i+=4){const n=(Math.random()*255-128)*int;id.data[i]=id.data[i+1]=id.data[i+2]=128+n;id.data[i+3]=25;}ctx.putImageData(id,0,0);}
-function addVignette(ctx,c,s){const g=ctx.createRadialGradient(c.width/2,c.height/2,Math.min(c.width,c.height)*0.2,c.width/2,c.height/2,Math.max(c.width,c.height)*0.7);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${s})`);ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);}
-function drawWatermark(ctx,c){ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(c.width-200,c.height-30,190,24);ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.fillText(`CHEZ • ${EVENT_CITY} ${EVENT_DATE}`,c.width-190,c.height-12);}
 
-/* === Blob === */
-async function prepareBlob(){const q=parseFloat(qualitySlider.value||'0.85');return new Promise(r=>canvas.toBlob(b=>{capturedBlob=b;r();},'image/jpeg',q));}
+function applyFilm(ctx, cvs){
+  const img = ctx.getImageData(0,0,cvs.width,cvs.height);
+  const d = img.data;
+  // Contrast curve + warm tint + gentle roll-off highlights (very visible)
+  for(let i=0;i<d.length;i+=4){
+    let r=d[i], g=d[i+1], b=d[i+2];
+    // S-curve
+    const map = (v)=> {
+      const t = v/255;
+      const s = t<0.5 ? (2.2*t*t) : (1 - Math.pow(-2.2*t+2.2,2)/2.2);
+      return Math.max(0, Math.min(255, s*255));
+    };
+    r = map(r); g = map(g); b = map(b);
+    // warm tint
+    r = r*1.08 + 4; g = g*1.02 + 1; b = b*0.98 - 2;
+    // highlight roll-off
+    const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+    if (lum > 220) { const k = 1 - (lum-220)/80; r*=k; g*=k; b*=k; }
+    d[i]=clamp(r); d[i+1]=clamp(g); d[i+2]=clamp(b);
+  }
+  ctx.putImageData(img,0,0);
+  addGrain(ctx,cvs,0.22);
+  addVignette(ctx,cvs,0.28);
+}
 
-/* === Local counter === */
-function incLocalCount(){const k=`chez_up_count_${EVENT_CODE}`;const n=parseInt(localStorage.getItem(k)||'0',10)+1;localStorage.setItem(k,n);return n;}
+function applyBW(ctx,cvs){
+  const img = ctx.getImageData(0,0,cvs.width,cvs.height);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    const y = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    // strong contrast
+    let v = (y-128)*1.25 + 128;
+    d[i]=d[i+1]=d[i+2]=clamp(v);
+  }
+  ctx.putImageData(img,0,0);
+  addGrain(ctx,cvs,0.26);
+  addVignette(ctx,cvs,0.35);
+}
 
-/* === Boot === */
+function clamp(v){ return v<0?0:(v>255?255:v); }
+
+function addGrain(ctx,cvs,intensity){
+  const {width:w,height:h}=cvs;
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    const n = (Math.random()*2-1) * 40 * intensity; // visible grain
+    d[i]   = clamp(d[i]   + n);
+    d[i+1] = clamp(d[i+1] + n);
+    d[i+2] = clamp(d[i+2] + n);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function addVignette(ctx,cvs,strength){
+  const g = ctx.createRadialGradient(cvs.width/2,cvs.height/2, Math.min(cvs.width,cvs.height)*0.25, cvs.width/2,cvs.height/2, Math.max(cvs.width,cvs.height)*0.75);
+  g.addColorStop(0,'rgba(0,0,0,0)');
+  g.addColorStop(1,`rgba(0,0,0,${strength})`);
+  ctx.fillStyle=g; ctx.fillRect(0,0,cvs.width,cvs.height);
+}
+
+function drawWatermark(ctx,cvs){
+  const text = `CHEZ • ${EVENT_CITY} ${EVENT_DATE}`;
+  const pad = Math.round(cvs.width * 0.02);
+  ctx.save();
+  ctx.font = 'bold 18px Inter, system-ui, sans-serif';
+  const metrics = ctx.measureText(text);
+  const w = metrics.width + pad*0.8, h = 26;
+  const x = cvs.width - w - pad, y = cvs.height - pad;
+  // pill bg
+  ctx.fillStyle='rgba(0,0,0,.5)';
+  const r=12;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y-h); ctx.arcTo(x+w,y-h,x+w,y,r);
+  ctx.arcTo(x+w,y,x,y,r); ctx.arcTo(x,y,x,y-h,r); ctx.arcTo(x,y-h,x+w,y-h,r); ctx.closePath(); ctx.fill();
+  // text
+  ctx.fillStyle='#fff'; ctx.fillText(text, x+10, y-8);
+  ctx.restore();
+}
+
+/* ===== Blob prep ===== */
+async function prepareBlob(){
+  const q=parseFloat(qualitySlider.value||'0.85');
+  return new Promise(res=>canvas.toBlob(b=>{ capturedBlob=b; res(); },'image/jpeg',q));
+}
+
+/* ===== Local unlock counter ===== */
+function incLocalCount(){
+  const key = `chez_up_count_${EVENT_CODE}`;
+  const n = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
+  localStorage.setItem(key, String(n));
+  return n;
+}
+
+/* ===== Boot ===== */
 if(navigator.mediaDevices?.getUserMedia){ initCamera(); }
 </script>
 </body>
